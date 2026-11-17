@@ -283,6 +283,16 @@ class FlowmatchingActionHead(nn.Module):
         nn.init.normal_(self.future_tokens.weight, mean=0.0, std=0.02)
 
         # ------------------------------------------------------------------
+        # vlln (LGES addition): LayerNorm on the VLM features before the DiT
+        #   cross-attends to them, as GR00T N1.5's `vlln`. A frozen VLM's
+        #   hidden states are not scaled for a head trained from scratch.
+        #   use_vlln: False (default) = the features go in as the VLM gives them.
+        # ------------------------------------------------------------------
+        self.vlln = (
+            nn.LayerNorm(diffusion_model_cfg["cross_attention_dim"]) if config.get("use_vlln", False) else nn.Identity()
+        )
+
+        # ------------------------------------------------------------------
         # Positional embedding over the action sequence
         #   add_pos_embed: whether to add sinusoidal-style learned PE
         #   max_seq_len:   max supported action sequence length
@@ -317,6 +327,7 @@ class FlowmatchingActionHead(nn.Module):
         actions: shape (B, action_horizon, action_dim)
         """
         device = vl_embs.device
+        vl_embs = self.vlln(vl_embs)
 
         # Embed noised action trajectory.
         noise = torch.randn(actions.shape, device=actions.device, dtype=actions.dtype)
@@ -372,6 +383,7 @@ class FlowmatchingActionHead(nn.Module):
         # Set initial actions as the sampled noise.
         batch_size = vl_embs.shape[0]
         device = vl_embs.device
+        vl_embs = self.vlln(vl_embs)
         actions = torch.randn(
             size=(batch_size, self.action_horizon, self.action_dim),
             dtype=vl_embs.dtype,

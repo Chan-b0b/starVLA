@@ -65,6 +65,9 @@ class QwenGR00TDefaultConfig:
             "attn_implementation": "flash_attention_2",
             # VLM hidden dimension (used for cross-attention alignment)
             "vl_hidden_dim": 2048,
+            # Which hidden state feeds the action head (LGES addition): index into the VLM's
+            # hidden_states (0 = embeddings, k = after layer k, -1 = last layer, the original behaviour)
+            "vl_layer": -1,
         }
     )
 
@@ -104,6 +107,8 @@ class QwenGR00TDefaultConfig:
             "num_inference_timesteps": 4,
             # Number of vision tokens fed to action head
             "num_target_vision_tokens": 32,
+            # LayerNorm on the VLM features inside the action head (LGES addition, off = original behaviour)
+            "use_vlln": False,
             # === DiT Transformer sub-config ===
             "diffusion_model_cfg": {
                 # Cross-attention dim (aligned to VLM hidden_size at runtime)
@@ -163,6 +168,7 @@ class Qwen_GR00T(baseframework):
         # are normalised upstream by `share_tools.apply_config_compat`, so we
         # only ever read `action_horizon` here.
         self.action_horizon = int(self.config.framework.action_model.action_horizon)
+        self.vl_layer = int(self.config.framework.qwenvl.get("vl_layer", -1))
 
     def forward(
         self,
@@ -187,7 +193,7 @@ class Qwen_GR00T(baseframework):
                 return_dict=True,
             )
             # last_hidden_state: [B, seq_len, H]
-            last_hidden = qwenvl_outputs.hidden_states[-1]  # [B, L, H]
+            last_hidden = qwenvl_outputs.hidden_states[self.vl_layer]  # [B, L, H]
 
         # Step 4: Action Expert Forward and Loss
         with torch.autocast("cuda", dtype=torch.float32):
@@ -260,7 +266,7 @@ class Qwen_GR00T(baseframework):
             )
 
             # last_hidden_state: [B, seq_len, H]
-            last_hidden = qwenvl_outputs.hidden_states[-1]  # [B, L, H]
+            last_hidden = qwenvl_outputs.hidden_states[self.vl_layer]  # [B, L, H]
 
         state = (
             torch.from_numpy(np.array(state)).to(last_hidden.device, dtype=last_hidden.dtype)

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Stand-in for nvcc. run_lges_train.sh points CUDA_HOME at this folder's parent.
+#
+# With a GPU visible, DeepSpeed asks `nvcc -V` at import for the CUDA version, to decide whether its optional
+# C++ / CUDA ops could be compiled, and raises "CUDA_HOME does not exist" when no CUDA toolkit is installed (none
+# is on this machine). ZeRO-2 training uses none of those ops. This script answers the version question with the
+# CUDA version torch was built for and refuses everything else, so nothing can be "compiled" with it by mistake.
+# With a real CUDA toolkit installed, remove this folder and the CUDA_HOME line in run_lges_train.sh.
+case "${1:-}" in
+  -V|--version) echo "nvcc stand-in (no CUDA toolkit on this machine)"
+                echo "Cuda compilation tools, release ${TORCH_CUDA_VERSION:-12.8}, V${TORCH_CUDA_VERSION:-12.8}.0" ;;
+  *) echo "nvcc stand-in: this machine has no CUDA toolkit; see $0" >&2; exit 1 ;;
+esac

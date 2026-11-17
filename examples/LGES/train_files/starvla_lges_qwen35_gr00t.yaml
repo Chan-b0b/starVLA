@@ -1,0 +1,80 @@
+# LGES task 3: Qwen3.5-0.8B (frozen) + GR00T-style DiT head on the sim datasets of LGES_Sim/data/vla.
+# Stage 1 of the plan: only the action head trains. Run with examples/LGES/train_files/run_lges_train.sh
+# (from the starVLA root: the relative paths below start there).
+run_id: lges_qwen35_gr00t_frozen
+run_root_dir: playground/Checkpoints
+seed: 42
+wandb_entity: null
+wandb_project: lges_vla
+is_debug: false
+version_id: "0.21"
+
+framework:
+  name: QwenGR00T
+  qwenvl:
+    base_vlm: ./playground/Pretrained_models/Qwen3.5-0.8B
+    attn_implementation: sdpa        # flash-attn is not installed; the Qwen3.5 wrapper uses sdpa anyway
+    vl_layer: -1                     # hidden state fed to the head: -1 = last layer; try 12..16 of 24 as an ablation
+
+  action_model:
+    action_model_type: DiT-B         # width 768, 12 heads
+    hidden_size: 1024
+    add_pos_embed: true
+    max_seq_len: 1024
+    action_dim: 5                    # cup tip dx, dy, dz, dyaw + pump
+    state_dim: 6                     # cup tip x, y, z, cos yaw, sin yaw + pump
+    action_horizon: 8                # 1.6 s at 5 Hz
+    use_vlln: true                   # LayerNorm on the frozen VLM's features
+    repeated_diffusion_steps: 8
+    noise_beta_alpha: 1.5
+    noise_beta_beta: 1.0
+    noise_s: 0.999
+    num_timestep_buckets: 1000
+    num_inference_timesteps: 4
+    num_target_vision_tokens: 32
+    diffusion_model_cfg:
+      dropout: 0.2
+      final_dropout: true
+      interleave_self_attention: true
+      norm_type: ada_norm
+      num_layers: 16
+      output_dim: 1024
+      positional_embeddings: null
+
+datasets:
+  vla_data:
+    dataset_py: lerobot_datasets
+    data_root_dir: ../../data/vla    # LGES_Sim/data/vla, written by LGES_Sim/vla/npz2lerobot.py
+    data_mix: lges_sim               # lges_sim_film + lges_sim_vis (examples/LGES/train_files/data_registry)
+    include_state: true
+    lerobot_version: v2.0
+    per_device_batch_size: 16
+    video_backend: torchvision_av    # unused: the frames are jpg files
+    # no obs_image_size and no lges_image_size: the frames go in as they are, 480x300
+
+trainer:
+  max_train_steps: 30000             # about 2 passes over the 222k frames at batch 16
+  num_warmup_steps: 1000
+  save_interval: 5000                # each checkpoint holds the VLM too, about 2.3 GB
+  eval_interval: 500
+  learning_rate:
+    base: 1.0e-04
+    qwen_vl_interface: 1.0e-05       # used from stage 2 on, when part of the VLM is unfrozen
+    action_model: 1.0e-04
+  lr_scheduler_type: cosine_with_min_lr
+  scheduler_specific_kwargs:
+    min_lr: 1.0e-06
+  freeze_modules: qwen_vl_interface  # stage 2: qwen_vl_interface.model.model.language_model (vision tower trains)
+  loss_scale:
+    vla: 1.0
+    vlm: 0.1
+  max_grad_norm: 1.0
+  weight_decay: 0.0
+  logging_frequency: 10
+  gradient_clipping: 1.0
+  gradient_accumulation_steps: 1
+  optimizer:
+    name: AdamW
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+    weight_decay: 1.0e-08
